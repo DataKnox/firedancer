@@ -1159,6 +1159,20 @@ load_keys( fd_votor_tile_t * ctx,
   ctx->auth_vtr_path_cnt = path_cnt;
 }
 
+/* Whether the identity this machine runs is ranked in an epoch. */
+static int
+is_ranked( fd_votor_tile_t const * ctx ) {
+  ag_epoch_info_t const * epoch_infos[3] = { ctx->prev_epoch_info, ctx->curr_epoch_info, ctx->next_epoch_info };
+  for( ulong i=0UL; i<3UL; i++ ) {
+    ag_epoch_info_t const * epoch_info = epoch_infos[ i ];
+    if( FD_UNLIKELY( !epoch_info ) ) continue;
+    for( ulong rank=0UL; rank<epoch_info->validator_cnt; rank++ ) {
+      if( FD_UNLIKELY( !memcmp( epoch_info->validators[ rank ].id_key, ctx->id_key.uc, sizeof(ag_id_key_t) ) ) ) return 1;
+    }
+  }
+  return 0;
+}
+
 static void
 update_own_rank( fd_votor_tile_t * ctx ) {
   ag_epoch_info_t const * epoch_infos[3] = { ctx->prev_epoch_info, ctx->curr_epoch_info, ctx->next_epoch_info };
@@ -1397,6 +1411,7 @@ publish_hist( fd_votor_tile_t *   ctx,
   msg->replay_slot = ctx->highest_completed_slot ? ctx->highest_completed_slot : ULONG_MAX;
   msg->root_slot   = ctx->root_slot;
   msg->has_vote    = has_vote;
+  msg->ranked      = ctx->vote_authority && is_ranked( ctx );
   msg->truncated   = ag_votor_hist_export( ctx->votor, leader_floor( ctx ), &msg->hist );
   if( FD_UNLIKELY( msg->truncated && !ctx->hist_was_truncated ) ) FD_LOG_WARNING(( "vote history export dropped windows below slot %lu, finality is far behind our votes", ag_hist_first_slot( msg->hist.anchor ) ));
   ctx->hist_was_truncated = msg->truncated;
@@ -1521,13 +1536,6 @@ failover_switched( fd_votor_tile_t * ctx ) {
   ctx->vote_authority        = operator || ctx->failover_hist_adopted;
   ctx->installed_by_failover = !operator;
 
-  /* A promotion votes past the adopted history's tip, its vote bound
-     and the leader floor, which are consensus state and lost on a
-     restart.  The vote history file written at unhalt holds only the
-     watermark, so raise it to cover them and the file this identity
-     boots from after a crash waits past them too.  The old identity's
-     file was written at the halt and is not affected. */
-
   if( FD_UNLIKELY( ctx->vote_authority && !operator ) ) {
     ulong slots[ 3 ] = { ctx->adopted_tip, ag_votor_get_vote_bound( ctx->votor ), floor };
     for( ulong i=0UL; i<3UL; i++ ) {
@@ -1643,9 +1651,18 @@ failover_adopt_response( fd_votor_tile_t *   ctx,
   if( FD_UNLIKELY( ctx->adopt_req_sz<FD_VOTOR_ADOPT_REQ_HDR_SZ || ctx->adopt_req_sz>sizeof(ctx->adopt_req) ) ) {
     FD_LOG_WARNING(( "failover: refusing a vote history adoption of %lu bytes, it has no target identity", ctx->adopt_req_sz ));
     result = (fd_votor_adopt_result_t){ .result=FD_VOTOR_ADOPT_ERR_DECODE, .root=ULONG_MAX, .vote_slot=ULONG_MAX, .vote_bound=ULONG_MAX };
-  } else if( FD_UNLIKELY( ctx->vote_authority && ctx->installed_by_failover ) ) {
-    FD_LOG_WARNING(( "failover: refusing a vote history adoption, this machine votes as an identity failover handed it" ));
+  } else if( FD_UNLIKELY( ctx->keyswitch_state==FD_KEYSWITCH_STATE_SWITCH_PENDING ||
+                          fd_keyswitch_state_query( ctx->id_keyswitch )==FD_KEYSWITCH_STATE_SWITCH_PENDING ) ) {
+    FD_LOG_WARNING(( "failover: rejecting a vote history adoption, an identity switch is in progress" ));
     result = (fd_votor_adopt_result_t){ .result=FD_VOTOR_ADOPT_ERR_INVALID, .root=ULONG_MAX, .vote_slot=ULONG_MAX, .vote_bound=ULONG_MAX };
+  } else if( FD_UNLIKELY( ctx->vote_authority && ( ctx->installed_by_failover || is_ranked( ctx ) ) ) ) {
+    FD_LOG_WARNING(( "failover: rejecting a vote history adoption, this machine votes as its identity" ));
+    result = (fd_votor_adopt_result_t){
+      .result=FD_VOTOR_ADOPT_ERR_INVALID,
+      .root=ULONG_MAX,
+      .vote_slot=ULONG_MAX,
+      .vote_bound=ULONG_MAX
+    };
   } else {
     ulong boot_bound = ULONG_MAX;
     ag_hist_t local;

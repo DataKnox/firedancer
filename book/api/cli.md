@@ -331,11 +331,7 @@ running validator.
 
 The command exits successfully (with an exit code of 0) if the
 authorized voter was added, otherwise it will fail and print diagnostic
-messages to `stderr`. Reasons for failure include the validator being
-unable to load or verify the provided authorized voter key, if the
-provided key is a duplicate that the validator is already using, or if
-there are too many authorized voters for the running validator (more
-than 16).
+messages to `stderr`.
 
 | Arguments         | Description |
 |-------------------|-------------|
@@ -399,7 +395,7 @@ that fails, it prints the reason as a warning and the local validator
 takes the identity without the machine running it. `--adopt` does so
 only while that machine shows no sign of life, neither in gossip for 15
 seconds nor on the failover channel, and otherwise fails with
-`holder_live`. `--force` does so even if that machine may be live.
+`holder_live`. `--force` does so even if that machine may still be alive.
 
 ::: warning WARNING
 
