@@ -2,6 +2,7 @@
 
 #include "configure.h"
 #include "fd_ethtool_ioctl.h"
+#include "fd_iavf_rule.h"
 #include "../../../platform/fd_file_util.h"
 #include "../../../platform/fd_sys_util.h"
 #include "../../../../disco/net/iavf/fd_iavf.h"
@@ -571,17 +572,6 @@ iavf_pf_ntuple_rule_get( fd_ethtool_ioctl_t *          ioc,
   if( -1==iavf_pf_ntuple_ioctl( ioc, &request ) ) return -1;
   *rule = request.fs;
   return 0;
-}
-
-static int
-iavf_pf_ntuple_rule_equal( struct ethtool_rx_flow_spec const * a,
-                           struct ethtool_rx_flow_spec const * b ) {
-  return a->flow_type==b->flow_type && a->ring_cookie==b->ring_cookie &&
-         a->location==b->location &&
-         0==memcmp( &a->h_u,   &b->h_u,   sizeof(a->h_u)   ) &&
-         0==memcmp( &a->m_u,   &b->m_u,   sizeof(a->m_u)   ) &&
-         0==memcmp( &a->h_ext, &b->h_ext, sizeof(a->h_ext) ) &&
-         0==memcmp( &a->m_ext, &b->m_ext, sizeof(a->m_ext) );
 }
 
 /* iavf_pf_ntuple_drop_rule_build returns a drop rule for the given UDP/IPv4
